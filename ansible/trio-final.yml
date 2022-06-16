@@ -1,0 +1,973 @@
+---
+
+#### GATHER NEXUS FACTS (DISABLE AFTER MERGING ALL PLAYBOOKS!!!!!!!!!!) #####
+
+- hosts: all
+  gather_facts: yes
+
+#### ANSIBLE RUN DYNATRACE INSALLATION LOCALLY ON KUBECTL ####
+
+- name: Configure Workers
+  hosts: localhost
+  connection: local
+  tasks:
+
+  - name: Setup kubeconfig local file
+    command: aws eks --region eu-central-1 update-kubeconfig --name trio-eks-dev
+
+  - name: Create a Dynatrace namespace
+    kubernetes.core.k8s:
+      name: dynatrace
+      kind: Namespace
+      state: present
+
+  - name: Install Dynatrace operator                                                                                                                                                                                       
+    k8s:                                                                                                                                                                                                             
+      definition: '{{ item }}'
+    with_items: '{{ lookup("url", "https://github.com/Dynatrace/dynatrace-operator/releases/download/v0.6.0/kubernetes.yaml", split_lines=False) | from_yaml_all | list }}'
+    when: item is not none
+
+  - name: Wait until Dynatrace operator and webhook pod is ready
+    kubernetes.core.k8s_info:
+      kind: Pod
+      label_selectors:
+        - app.kubernetes.io/name=dynatrace-operator
+        - app.kubernetes.io/component=webhook
+      wait: yes
+      namespace: dynatrace
+      wait_condition:
+        type: Ready
+      wait_timeout: 360
+
+  - name: Apply the Dynatrace fullstack monitoring deployment
+    kubernetes.core.k8s:
+      state: present
+      src: ../config/dynatrace/dynakube.yml
+
+#################### NEXUS SERVER ####################
+
+
+- name: Configure Nexus Server
+  hosts: nexus
+  tasks:
+
+  - name: waiting for server to be alive
+    wait_for:
+      state: started
+      port: 22
+      host: nexus
+      delay: 10
+      timeout: 300
+
+  - name: Update packages
+    apt: 
+      update_cache: yes 
+
+
+  - name: Install java 8
+    apt:
+      force_apt_get: yes
+      name: openjdk-8-jre-headless
+      state: latest
+    register: apt_status
+    until: apt_status is success
+
+  - name: Install net-tools
+    apt: 
+      name: net-tools 
+    register: apt_status
+    until: apt_status is success
+
+# get_url işleminin sonucunu register içine atıyoruz ve bu sonucun içeriğindeki "dest" değişkenini unarchive içerisinde kullanıyoruz. Her ne kadar senin url download linkin 3.38'ü göstersede bazı download linkleri LATEST şeklinde indirim yapıyor fakat indirilen dosyanın isimlendirmesi buna rağmen bir versiyon isimlendirmesi ile geliyor. Bu gibi durumlarda variable interpolation ile dinamik olarak dosya ismini bir taskda çekip başka taska passlamak best practicedir, yoksa her seferinde manuel hardcoded dosya ismi girmen gerekecek. 
+- name: Download and unpack nexus
+  hosts: nexus
+  tasks:
+  - name: Check nexus folder stats
+    stat:
+      path: /opt/nexus
+    register: stat_result
+  
+  - name: Download Nexus
+    get_url:
+      url:	https://download.sonatype.com/nexus/3/nexus-3.38.1-01-unix.tar.gz
+      dest: /opt/
+    register: download_result
+
+
+  - name: Untar nexus package
+    unarchive:
+      src: "{{download_result.dest}}"
+      dest: /opt/
+      remote_src: yes
+    # only untar this package if there is no /opt/nexus folder
+    when: not stat_result.stat.exists
+
+
+  - name: Find nexus folder
+    find:
+      paths: /opt
+      pattern: "nexus-*"
+      file_type: directory
+    register: find_result
+  # Nexus folder'ı var mı diye kontrol ediyoruz. Bunun için Stat isimli modülü kullanıyoruz. Bu check işini yapmamızın sebebi, bir sonraki taskda nexus folder'ı rename ediyoruz. Ama eğer bu folder zaten varsa hata alacağımız için bunu aşağıda conditiona bağladık stat'dan aldığımız veriyi check ederek. Çünkü "command" ve "shell" komutlar ansible'da state managed değildir ve her zaten execute edilirler ve bu problem yaratır eğer ilgili önlemlere proaktif bir şekilde almazsak.
+  
+  - name: Rename nexus folder
+    command: mv {{find_result.files[0].path}} /opt/nexus
+    when: not stat_result.stat.exists
+
+- name: Create nexus user and assign it to relevant folders
+  hosts: nexus
+  tasks:
+  - name: Create and ensure group exists
+    group:
+      name: nexus
+      state: present
+  - name:  Create nexus user
+    user:
+      name: nexus
+      group: nexus
+      state: present
+  - name:  Make nexus user and group the owner of the nexus folder
+    file:
+      path: /opt/nexus
+      state: directory
+      owner: nexus
+      group: nexus
+      recurse: yes
+  - name:  Make nexus user and group the owner of sonatype-work folder
+    file:
+      path: /opt/sonatype-work
+      state: directory
+      owner: nexus
+      group: nexus
+      recurse: yes
+
+- name: Start nexus with nexus user.
+  hosts: nexus
+  become: True
+  become_user: nexus
+  tasks:
+  - name: Edit user configuration file of nexus and set the user to nexus
+    lineinfile:
+      path: /opt/nexus/bin/nexus.rc
+      regexp: '^run_as_user=""'
+      line: run_as_user="nexus"
+
+  # Buradaki password randomization disable işi şimdilik quick & dirty bir çözüm. API'lar ile bunun daha doğru bir yöntemi var. Daha sonra bunu çöz.
+  - name: Start nexus
+    command: /opt/nexus/bin/nexus start
+    environment:
+      NEXUS_SECURITY_RANDOMPASSWORD: false
+
+  - name: Validating if the WebServer is UP and OPENED the PORT
+    wait_for:
+        host: nexus
+        port: 8081
+        delay: 1
+        timeout: 300
+        state: started
+
+  - name: Configure anonymous access programmatically
+    uri:
+      url: "http://{{ hostvars['nexus']['ansible_default_ipv4']['address'] }}:8081/service/rest/v1/security/anonymous/"
+      user: admin
+      password: admin123
+      method: PUT
+      body_format: json
+      body: "{{ lookup('file','../config/nexus/anonymous.json') }}"
+      force_basic_auth: yes
+  
+  - name: Configure realms for docker repo
+    uri:
+      url: "http://{{ hostvars['nexus']['ansible_default_ipv4']['address'] }}:8081/service/rest/v1/security/realms/active"
+      user: admin
+      password: admin123
+      method: PUT
+      body_format: json
+      body: "{{ lookup('file','../config/nexus/realm.json') }}"
+      status_code: 204
+      force_basic_auth: yes
+
+    # Status code 400 skip etmen bad practice. Şimdilik quick and dirty, fakat sonrası için eğer mevcutta zaten REPO varsa tekrar POST request göndermeyecek şekilde condition yaratman gerekiyor.
+  - name: Create private hosted docker repo
+    uri:
+      url: "http://{{ hostvars['nexus']['ansible_default_ipv4']['address'] }}:8081/service/rest/v1/repositories/docker/hosted"
+      user: admin
+      password: admin123
+      method: POST
+      body_format: json
+      body: "{{ lookup('file','../config/nexus/repo.json') }}"
+      status_code: 201, 400
+      force_basic_auth: yes
+
+# - name: Generate a self signed SSL certificate.
+#   hosts: nexus
+#   become: True
+#   tasks:
+
+#   - name:  Create certs directory
+#     file:
+#       path: /root/certs
+#       state: directory
+#       owner: root
+#       group: root
+#       recurse: yes
+
+#   - name: create CA key
+#     openssl_privatekey:
+#       path: /root/certs/CA_key.pem
+#     register: ca_key
+
+#   - name: create the CA CSR
+#     openssl_csr:
+#       path: /root/certs/CA.csr
+#       privatekey_path: "{{ ca_key.filename }}"
+#       common_name: "my-ca"
+#     register: ca_csr
+
+#   - name: sign the CA CSR
+#     openssl_certificate:
+#       path: /root/certs/CA.crt
+#       csr_path: "{{ ca_csr.filename }}"
+#       privatekey_path: "{{ ca_key.filename }}"
+#       provider: selfsigned
+#     register: ca_crt
+
+#   - name: create host CSR signing key
+#     openssl_privatekey:
+#       path: /root/certs/nexus_key.pem
+#     register: nexus_key
+
+#   - name: create the CSR for the Nexus server
+#     openssl_csr:
+#       path: /root/certs/nexus.csr
+#       privatekey_path: "{{ nexus_key.filename }}"
+#       common_name: nexustest.xyz
+#       subject_alt_name: 'DNS:www.nexustest.xyz'
+#     register: nexus_csr
+
+#   - name: sign the CSR for the LDAP server
+#     openssl_certificate:
+#       path: /root/certs/nexus_cert.crt
+#       csr_path: "{{ nexus_csr.filename }}"
+#       provider: ownca
+#       ownca_path: "{{ ca_crt.filename }}"
+#       ownca_privatekey_path: "{{ ca_key.filename }}"
+#     register: nexus_crt
+
+
+- name: Install NGINX as reverse proxy.
+  hosts: nexus
+  become: True
+  tasks:
+
+  - name: Install NGINX
+    apt:
+      name: nginx
+      state: present
+
+  - name: Copy Override config file
+    template:
+      src: ../config/nginx/nginx.conf
+      dest: /etc/nginx/nginx.conf
+      owner: root
+      group: root
+      mode: 0644
+
+  # - name:  Create certs directory
+  #   file:
+  #     path: /root/certs
+  #     state: directory
+  #     owner: root
+  #     group: root
+  #     recurse: yes
+
+  - name: Copy the Nexus certificate key
+    template:
+      src: ../config/certificates/cert-key.pem
+      dest: /etc/nginx/cert-key.pem
+      owner: root
+      group: root
+      mode: 0644
+  
+  - name: Copy the Nexus public certificate
+    template:
+      src: ../config/certificates/cert.pem
+      dest: /etc/nginx/cert.pem
+      owner: root
+      group: root
+      mode: 0644
+  
+  # - name: Copy the CA certificate.
+  #   template:
+  #     src: ../config/certificates/ca.pem
+  #     dest: /etc/nginx/ca.pem
+  #     owner: root
+  #     group: root
+  #     mode: 0644
+
+  - name: Reload service nginx, in all cases
+    service:
+      name: nginx
+      state: reloaded
+
+  - name: Restart service nginx, in all cases
+    service:
+      name: nginx
+      state: restarted
+
+
+#### sertifikalarda sanırım sorun var. konfigi düzgün kopyaladın çünkü ve nginx restart oldu yeni config ile.
+
+
+
+
+
+
+
+
+  # Playbooku Oracle VM içerisinde çalıştırdığın için kendi windows makinene şu anda ekleme yapamıyorsun. Bunu en son hallet.
+
+  # - name: Add nexustest.xyz.com to Windows hosts file
+  #   community.windows.win_hosts:
+  #     state: present
+  #     canonical_name: nexustest.xyz
+  #     ip_address: "{{ hostvars['nexus']['ansible_default_ipv4']['address'] }}"
+
+################## JENKINS SERVER ####################
+
+- name: Configure Jenkins Server
+  hosts: jenkins
+  become: true
+  pre_tasks:
+    - name: Update package manager
+      apt: 
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+       name: net-tools
+       state: present
+  
+# Bu iki mini task ile Jenkins'in configurasyon dosyasını kurulumdan önce ilgili klasörlere yerleştiriyorum. CSRF ve diğer konfigürasyonları buradan disable ediyorum. Jenkins role'u yaratan arkadaşın java args ve options parametreleri eski versiyon jenkinsde çalışıyor fakat yeni versiyonda bu yolu izlemem gerekti.
+    - name: Create Jenkins service.d directory
+      file:
+        path: /etc/systemd/system/jenkins.service.d/
+        state: directory
+        owner: root
+        group: root
+        mode: 0755
+
+    - name: Copy Override config file
+      template:
+        src: ../config/jenkins/override.conf
+        dest: /etc/systemd/system/jenkins.service.d/override.conf
+        owner: root
+        group: root
+        mode: 0644
+
+  vars:
+    jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io.key
+    jenkins_repo_url: deb https://pkg.jenkins.io/debian binary/
+    jenkins_hostname: "{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}"
+    jenkins_plugins:
+      - javax-activation-api
+      - javax-mail-api
+      - sshd
+      - cloudbees-folder
+      - antisamy-markup-formatter
+      - structs
+      - token-macro
+      - build-timeout
+      - credentials
+      - trilead-api
+      - ssh-credentials
+      - workflow-step-api
+      - plain-credentials
+      - credentials-binding
+      - scm-api
+      - workflow-api
+      - timestamper
+      - caffeine-api
+      - script-security
+      - plugin-util-api
+      - font-awesome-api
+      - popper-api
+      - jquery3-api
+      - bootstrap4-api
+      - snakeyaml-api
+      - jackson2-api
+      - popper2-api
+      - bootstrap5-api
+      - echarts-api
+      - display-url-api
+      - workflow-support
+      - checks-api
+      - junit
+      - matrix-project
+      - resource-disposer
+      - ws-cleanup
+      - ant
+      - jaxb
+      - durable-task
+      - workflow-durable-task-step
+      - jdk-tool
+      - command-launcher
+      - bouncycastle-api
+      - ace-editor
+      - workflow-scm-step
+      - workflow-cps
+      - workflow-job
+      - apache-httpcomponents-client-4-api
+      - workflow-basic-steps
+      - gradle
+      - pipeline-milestone-step
+      - pipeline-build-step
+      - pipeline-stage-step
+      - pipeline-model-api
+      - pipeline-model-extensions
+      - variant
+      - jsch
+      - git-client
+      - git-server
+      - workflow-cps-global-lib
+      - branch-api
+      - workflow-multibranch
+      - pipeline-stage-tags-metadata
+      - pipeline-input-step
+      - pipeline-model-definition
+      - lockable-resources
+      - workflow-aggregator
+      - jjwt-api
+      - okhttp-api
+      - github-api
+      - git
+      - github
+      - github-branch-source
+      - pipeline-github-lib
+      - pipeline-graph-analysis
+      - pipeline-rest-api
+      - handlebars
+      - momentjs
+      - pipeline-stage-view
+      - ssh-slaves
+      - matrix-auth
+      - jnr-posix-api
+      - pam-auth
+      - ldap
+      - email-ext
+      - configuration-as-code
+      - docker-commons
+      - docker-workflow
+
+  roles:
+    - role: geerlingguy.java
+    - role: geerlingguy.jenkins
+
+
+  tasks:
+
+    - name: Add Nexus domain to Jenkins /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars['nexus']['ansible_default_ipv4']['address'] }} nexustest.xyz"
+        create: yes
+
+    - name: Copy the CA certificate to Jenkins server to be able to login Nexus docke repo witout issues.
+      template:
+        src: ../config/certificates/ca.pem
+        dest: /etc/ssl/certs/ca.pem
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create Jenkins configuration as code directory
+      file:
+        path: /var/lib/jenkins/casc_configs
+        state: directory
+        owner: jenkins
+        group: jenkins
+        mode: 0755
+    
+
+    - name: Copy Jenkins config as code yaml
+      template:
+        src: ../config/jenkins/jenkcasc.yml
+        dest: /var/lib/jenkins/casc_configs
+        owner: jenkins
+        group: jenkins
+        mode: 0644
+  
+    - name: Install aptitude
+      apt:
+          name: aptitude
+          state: latest
+          update_cache: true
+
+    - name: Install required system packages
+      apt:
+          pkg:
+            - apt-transport-https
+            - ca-certificates
+            - curl
+            - software-properties-common
+            - python3-pip
+            - virtualenv
+            - python3-setuptools
+          state: latest
+          update_cache: true
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+          url: https://download.docker.com/linux/ubuntu/gpg
+          state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+          repo: deb https://download.docker.com/linux/ubuntu focal stable
+          state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+          name: docker-ce
+          state: latest
+          update_cache: true
+
+    - name: Install Docker Module for Python
+      pip:
+          name: docker
+
+    - name: copy docker daemon config
+      copy:
+        src: ../config/jenkins/daemon.json
+        dest: /etc/docker/daemon.json
+    
+    - name: Jenkins usera docker grubunun da yetkilerini veriiyoruz.
+      user:
+        name: jenkins
+        groups: docker
+        append: yes
+
+    - name: Give insecure permissions to an existing file
+      file:
+        path: /var/run/docker.sock
+        owner: jenkins
+        group: jenkins
+        mode: 0666
+
+
+    - name: start and enable docker service
+      service:
+        name: docker
+        enabled: yes
+        state: restarted
+
+#################### JENKINS JOBS ####################
+
+- name: CREATE AND BUILD JENKINS JOBS
+  hosts: jenkins
+  become: yes
+  tasks:
+
+    - name: Validating if the Jenkins is UP and OPENED the PORT
+      wait_for:
+          host: jenkins
+          port: 8080
+          delay: 1
+          timeout: 300
+          state: started
+
+    - name: Create shippingservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=shippingservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/shippingservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build shippingservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/shippingservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for shippingservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/shippingservice/shippingservice.txt
+        search_regex: successfully
+    
+    - name: Delete the shippingservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/shippingservice/shippingservice.txt
+        state: absent
+
+    - name: Create adservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=adservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/adservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build adservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/adservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+      
+    - name: Check for adservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/adservice/adservice.txt
+        search_regex: successfully
+
+    - name: Delete the adservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/adservice/adservice.txt
+        state: absent
+
+
+    - name: Create cartservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=cartservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/cartservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build cartservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/cartservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for cartservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/cartservice/cartservice.txt
+        search_regex: successfully
+
+    - name: Delete the cartservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/cartservice/cartservice.txt
+        state: absent
+
+    - name: Create checkoutservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=checkoutservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/checkoutservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build checkoutservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/checkoutservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for checkoutservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/checkoutservice/checkoutservice.txt
+        search_regex: successfully
+
+    - name: Delete the checkoutservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/checkoutservice/checkoutservice.txt
+        state: absent
+
+    - name: Create currencyservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=currencyservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/currencyservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build currencyservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/currencyservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for currencyservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/currencyservice/currencyservice.txt
+        search_regex: successfully
+
+    - name: Delete the currencyservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/currencyservice/currencyservice.txt
+        state: absent
+
+    - name: Create emailservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=emailservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/emailservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build emailservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/emailservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for emailservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/emailservice/emailservice.txt
+        search_regex: successfully
+
+    - name: Delete the emailservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/emailservice/emailservice.txt
+        state: absent
+
+    - name: Create frontend job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=frontend"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/frontend.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build frontend job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/frontend/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for frontend build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/frontend/frontend.txt
+        search_regex: successfully
+
+    - name: Delete the frontend.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/frontend/frontend.txt
+        state: absent
+
+    - name: Create loadgenerator job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=loadgenerator"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/loadgenerator.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build loadgenerator job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/loadgenerator/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for loadgenerator build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/loadgenerator/loadgenerator.txt
+        search_regex: successfully
+
+    - name: Delete the loadgenerator.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/loadgenerator/loadgenerator.txt
+        state: absent
+
+    - name: Create paymentservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=paymentservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/paymentservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build paymentservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/paymentservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for paymentservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/paymentservice/paymentservice.txt
+        search_regex: successfully
+
+    - name: Delete the paymentservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/paymentservice/paymentservice.txt
+        state: absent
+
+    - name: Create productcatalogservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=productcatalogservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/productcatalogservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build productcatalogservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/productcatalogservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for productcatalogservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/productcatalogservice/productcatalogservice.txt
+        search_regex: successfully
+
+    - name: Delete the productcatalogservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/productcatalogservice/productcatalogservice.txt
+        state: absent
+
+    - name: Create recommendationservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/createItem?name=recommendationservice"
+        user: admin
+        password: admin
+        method: POST
+        body_format: raw
+        body: "{{ lookup('file','jenkins-jobs/recommendationservice.xml') }}"
+        force_basic_auth: yes
+        status_code: 200, 201, 400
+        headers:
+         Content-Type: "text/xml"
+
+    - name: Build recommendationservice job
+      uri:
+        url: "http://{{ hostvars['jenkins']['ansible_default_ipv4']['address'] }}:8080/job/recommendationservice/build"
+        user: admin
+        password: admin
+        method: POST
+        status_code: 200, 201, 400
+        force_basic_auth: yes
+
+    - name: Check for recommendationservice build success
+      wait_for:
+        path: /var/lib/jenkins/workspace/recommendationservice/recommendationservice.txt
+        search_regex: successfully
+
+    - name: Delete the recommendationservice.txt file for the next build confirmation check
+      file:
+        path: /var/lib/jenkins/workspace/recommendationservice/recommendationservice.txt
+        state: absent
+
+#### EKS WORKERS #####
+
+- name: Configure Workers 
+  hosts: workers
+  user: ec2-user
+  become: True
+  tasks:
+
+  - name: Add Nexus domain to Jenkins /etc/hosts
+    lineinfile:
+      path: /etc/hosts
+      line: "{{ hostvars['nexus']['ansible_default_ipv4']['address'] }} nexustest.xyz"
+      create: yes
+
+  - name: Copy the CA certificate to Jenkins server to be able to login Nexus docke repo witout issues.
+    template:
+      src: ../config/certificates/ca.pem
+      dest: /etc/pki/tls/certs/ca.pem
+      owner: root
+      group: root
+      mode: 0644
+
+  - name: start and enable docker service
+    service:
+      name: docker
+      enabled: yes
+      state: restarted
+
+
+###### APPLY APPLICATIONS MANIFESTS #######
+
+- name: Configure Workers
+  hosts: localhost
+  connection: local
+  tasks:
+
+  - name: Create a Deployment by reading the definition from a local file
+    kubernetes.core.k8s:
+      kubeconfig: "/home/serhat/.kube/config"
+      state: present
+      src: ../config/workers/boutique.yml

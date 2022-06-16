@@ -1,0 +1,22 @@
+{
+    "name": "private-docker",
+    "online": true,
+    "storage": {
+      "blobStoreName": "default",
+      "strictContentTypeValidation": true,
+      "writePolicy": "ALLOW"
+    },
+    "cleanup": {
+      "policyNames": [
+        "string"
+      ]
+    },
+    "component": {
+      "proprietaryComponents": true
+    },
+    "docker": {
+      "v1Enabled": false,
+      "forceBasicAuth": true,
+      "httpPort": 8083
+    }
+  }

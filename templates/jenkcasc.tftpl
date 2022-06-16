@@ -1,0 +1,69 @@
+%{ for i in do_droplets ~}
+%{ if i.name == "nexus" ~}
+jenkins:
+  systemMessage: "Example of configuring credentials in Jenkins"
+  globalNodeProperties:
+  - envVars:
+      env:
+      - key: registry
+        value: "${i.ipv4_address}:8083"
+
+credentials:
+  system:
+    domainCredentials:
+    - credentials:
+      - usernamePassword:
+          description: "nexus repo credentials"
+          id: "nexus"
+          password: "admin123"
+          scope: GLOBAL
+          username: "admin"
+      - basicSSHUserPrivateKey:
+          description: "prodevopsprojects"
+          id: "prodevopsprojects"
+          scope: GLOBAL
+          username: "prodevopsprojects"
+          privateKeySource:
+            directEntry:
+              privateKey: |
+                -----BEGIN RSA PRIVATE KEY-----
+                MIIG5AIBAAKCAYEAvuiaIDs+ydzR7Xxo5Owvv+G9/arbqN0YwhaGQQlicJjM4ZvI
+                1kXQCq31Egn/60tiCfSonWSxxLNj5T+BfuvxdkgI/zvylmxPzHUeUTcm6Z0pWCT8
+                RLiM7dD+V404JlQHv4W7lT5q+5QTjOq+y5mZxxzP2zZexG4ZW78ndb+H/reieCU5
+                B8bp1nfnVZa8FIN80AQsdeCE4EJQieX4H4d/3ociYfCnSmeD12yV3dwayNqteagI
+                1rNKx3ATEv/doxBxNNYGCfb6gfBj6nPX3efJZVVF36+c8C36c01YiaVTJ3te1x/1
+                ypHdqOu8G8Pf3WvBfEQVflIRWQXVLyA7ypXS9BVys6uMwdNLZhMw4guh22wGShFi
+                imaGHu4ldkuxTTxhkIuZ/tpULVrz4GncLTURQDx7sdfcmoAdX5WreZTeKEbcgVHj
+                kUI4+s1CK1eSCCNaD9zey6SHP5FG74vwV3pWiorlA4VgD2Qh7E0XSyBvzPzYukHJ
+                +k/GIl9jQTI8PZv7AgMBAAECggGAH+oqufCtknmD7ru5nWuOn/lRFbMWfahYlznE
+                v+Kdvk0NEzpD3O5W1TI3oghh7Cfx/9AS0B0hSsziilSPhXRULX3lYyXWbCc3P+rk
+                YpdhvfQ0ETQ9qA9iH++sVV6aYG3zzaTBszV4FQ6wJgKoWskW2B6M8Qyp0xTE0H2o
+                Txrx1TdFxegTHKW4Oc5Zsgk88AD7QJsyA5LBI+xyIlt7m2m/iqf0q4LbtKiRddYF
+                R82f/KvyDEB3Gc1nVuf5iFeV6ci5mjKXI/Lr7sXFSSIP/dVx6ZRKfmk9ektrq+Pb
+                AhgVt6xXguek1t72st3gfEv95eMe5FAsjpQktfn54QvS4TfgoVrNf7xkrMSD4EWG
+                UajaYKZb3Yh4HvU+qvpf8fkMIKujmQ+kW8i6/gOEPKvn1LQyKtchlzGfsJqknB98
+                v3GL+PSGTq/lixdl06gM7JYlCF0ChP7vl+MsLqPUqcyEez0YHVoT/M4qTHuCm/Hq
+                MaAgA5L8bRLtQrDkFA6yswPLfW7hAoHBAOSglRHYZlik5ZV0wiREt722If9XbmxY
+                EVYv35C2bcX3aRvt1oGJ9M3TEyZIhFlvdKmyeC2bgbcUZt4YoicxMjE6O5hP+vfc
+                R1QAoBGV+oRUvz9hoQ9uVpiLOGLzXbrlWyKdtQpdtLekaLrmFi4dNl9NXzd3LBut
+                geuzJrBydDNa6gwzwsXMiVrgnPltfj5aFQBR5kULRrlH71PIG8DeiQ8ETFD7q6b4
+                UDUNnpoaO+ImdnU8kR3y4/NsD0Ns+2m7NwKBwQDVw/GcYeBLpm7vmjXJNkgq414i
+                ngCieJY6Ab0/5OZSO4sy8aMy4mS/UudXs8JIbLhR+607wrpj0dfccHgnTQgauff1
+                ddLQMwFXe+7zzwFPyJFxNabzIh0DguqLPLSMRSrFVir5OmKM1W2DiXaJg42DKJT+
+                RlvDptZdQ5u1o+BRcK8uaCWVyfhE2IlrynLIhgBRNu6lYJxbqo/WDzQFg7Qwm/f2
+                z3NLZ6JvdGp+33hXL7x2Mq9WGN6z+r2o8I/2r10CgcEAkVQOTiCrti9jjOSCQEG6
+                NoqfA8vU8mPs6UdXKor8Lnn9w3YlA4TpKyjAJHa2Qo+ZrgE3aW5PP0xls0ofUSBx
+                kl884K3+jy3j3V7kYSlf7FxekXCCy+dMfn0I48VlUFdY3iE3opY8OPv2Ys+9S6Tg
+                GiZ5ny1OyW06h9QChOjMOpTQ7967Mba5nR3oSpkyRXpHnUNyR3NKip5SYIR0N959
+                ayFFTbkcvO9dNMwqhDSm2jOu2wkcCdiK1AJdlXOiQOxzAoHBALXXt4K2aB0yeZBt
+                eG+wM3f4bq24BwYu2myB6kGeMKena2Rs1c2FdPqkRZP/oLgHdEyZceYyYmhjq+Mj
+                8bJM/yXtKRevoSPnH68SCFVytMTv83mAkIKndFL2XRsRCu2AMUApaukUV51COaT5
+                nNKiDBGUxhoANDOdiyFPT/gWbc4Zs4wgoEhpxT6bjVsansYh58cumZgpNRltYGpS
+                CIjgXrozE57rHkL45980AxvmcfKI8yMBPtJY2an1FL3P1kedKQKBwDzVEGdZneRe
+                O+xVnim5vL9opEu3vKiTbd46UQQTlqotUAMyTcZbim66Gkm0AUfePDcotnu38XHl
+                I6gxNN3RnsY+KRGqDlTHXEKcKCZ5UsKE5PB+lD/skh1SYtfYAVaQdaaHeXXFQD6f
+                WcsUYCYtrBG6jfOmAGM16pzwrm3caLldnuFrsnRiQMmcZBs7ijdYCekX/XapPMEI
+                53Zg4QmSb1XGKUTXxIeGd27OIvgkwAn7K/cjQsU9t802iYV3tisnfA==
+                -----END RSA PRIVATE KEY-----
+%{ endif ~}
+%{ endfor ~}

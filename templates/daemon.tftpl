@@ -1,0 +1,9 @@
+%{ for i in do_droplets ~}
+%{ if i.name == "nexus" ~}
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "insecure-registries" : [ "${i.ipv4_address}:8083" ],
+  "live-restore": true
+}
+%{ endif ~}
+%{ endfor ~}
