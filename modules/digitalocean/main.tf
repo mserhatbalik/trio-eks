@@ -7,15 +7,14 @@ terraform {
   }
 }
 
-#### SSH KEYS ####
-////////////////////////////////////////////////////
+####### SSH KEYS #######
+
 resource "digitalocean_ssh_key" "default" {
   name       = "Droplets SSH Key"
   public_key = file(var.do_ssh_key)
 }
 
-##### DROPLETS #####
-# Yeni Droplet yaratıyoruz.
+####### DROPLETS #######
 
 resource "digitalocean_droplet" "my-droplets" {
   count    = length(var.do_droplet_names)
@@ -32,8 +31,7 @@ resource "digitalocean_droplet" "my-droplets" {
   }
 }
 
-##### NETWORKING #####
-# Custom VPC yaratıyoruz.
+####### NETWORKING #######
 
 resource "digitalocean_vpc" "do_custom-vpc" {
   name     = var.do_vpc_name
@@ -41,7 +39,7 @@ resource "digitalocean_vpc" "do_custom-vpc" {
   ip_range = var.do_vpc_cidr
 }
 
-##### FIREWALL #####
+####### FIREWALL #######
 # Burada LOKAL olarak tanımladığımız ve işlediğimiz tüm IP'leri kurallara kullanılmak üzere passlıyoruz.
 
 resource "digitalocean_firewall" "custom-firewall" {
