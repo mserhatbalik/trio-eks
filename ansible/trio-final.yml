@@ -1,6 +1,5 @@
 ---
-
-#### GATHER NEXUS FACTS (DISABLE AFTER MERGING ALL PLAYBOOKS!!!!!!!!!!) #####
+#### GATHER NEXUS FACTS #####
 
 - hosts: all
   gather_facts: yes
@@ -45,7 +44,6 @@
       src: ../config/dynatrace/dynakube.yml
 
 #################### NEXUS SERVER ####################
-
 
 - name: Configure Nexus Server
   hosts: nexus
