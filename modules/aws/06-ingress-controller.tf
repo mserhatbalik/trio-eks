@@ -27,7 +27,6 @@ locals {
 
 ########### AWS LB CONTROLLER ##########
 
-
 # Datasource: 
 data "aws_eks_cluster_auth" "cluster" {
   name = aws_eks_cluster.eks_cluster.id
@@ -159,7 +158,6 @@ resource "helm_release" "loadbalancer_controller" {
 resource "kubernetes_ingress_class_v1" "ingress_class_default" {
   depends_on = [helm_release.loadbalancer_controller]
   metadata {
-    # İsmini daha düzgün birşey yap bunun.
     name = "eks-ingress-class"
     annotations = {
       "ingressclass.kubernetes.io/is-default-class" = "true"

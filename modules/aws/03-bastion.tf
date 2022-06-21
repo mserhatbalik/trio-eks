@@ -1,6 +1,5 @@
-####### INSTANCES ########
+######### INSTANCES #########
 
-#### Bastion Host ####
 resource "aws_eip" "bastion" {
   depends_on = [module.ec2_bastion_host, module.vpc]
   instance = module.ec2_bastion_host.id

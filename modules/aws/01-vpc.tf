@@ -1,4 +1,4 @@
-###### VPC #######
+######### VPC #########
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -8,8 +8,9 @@ module "vpc" {
   cidr = var.aws_vpc_cidr
 
     # Mevcut AZ isimlerinin listesini çekip yalnızca belirttiğimiz AZ count kadarını slice edip liste olarak paslıyoruz.
+    #azs = ["${var.aws_region}a", "${var.aws_region}b", "${var.aws_region}c"]
     azs = slice(data.aws_availability_zones.available.names,0, var.aws_az_count)
-#   azs = ["${var.aws_region}a", "${var.aws_region}b", "${var.aws_region}c"]
+   
 
     # DAHA SONRASINDA BU KISMIDA CIDRSUBNET ILE DINAMIK HALE GETIR. SIMDI YAPMAMAMIN SEBEBI SECURITY GROUPLAR FILAN GIRECEK ISIN ICINE KARISMASIN.
     private_subnets     = ["10.0.1.0/24", "10.0.2.0/24"]
@@ -33,7 +34,6 @@ module "vpc" {
       Name = "${var.aws_vpc_name}-public-subnet"
       "kubernetes.io/cluster/${var.aws_eks_cluster_name}-${var.aws_environment}" = "shared"
       "kubernetes.io/role/elb" = 1
-
   }
 
   private_subnet_tags = {

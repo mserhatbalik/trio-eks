@@ -1,6 +1,5 @@
-##### SECURITY GROUPS #####
+######### SECURITY GROUPS #########
 
-#### Bastion Host Security Group ####
 module "public_bastion_security_group" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "4.9.0"
@@ -20,5 +19,4 @@ module "public_bastion_security_group" {
   tags = {
       Name = "BastionSG"
   }
-
 }
