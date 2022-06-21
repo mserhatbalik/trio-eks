@@ -1,5 +1,6 @@
-terraform {
+######### BACKEND & MODULES #########
 
+terraform {
   # Remote state özelliğini aktif hale getirmek için bu kısımı yazıyoruz. Daha öncesinde "remote-state-storage-4895135" isimli s3 kaynağını AWS console'dan yaratman gerekiyor ilgili regionda. Belki ek olarak DynamodDB eklenebilir eğer state locking özelliği otomatik olarak konfigüre olmuyor ise sadece bu opsiyonlar ile. 
   backend "s3" {
     bucket = "remote-state-storage-4895135"

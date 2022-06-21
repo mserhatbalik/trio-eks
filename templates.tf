@@ -1,3 +1,5 @@
+######## JINJA2 TEMPLATING #########
+
 resource "local_file" "inventory" {
   filename = "./ansible/inventory"
   content = templatefile("./templates/inventory.tftpl",
@@ -10,7 +12,6 @@ resource "local_file" "inventory" {
     working_dir = "/home/serhat/Documents/ProDevOpsProjects/trio-eks/ansible"
     command = "ansible-playbook -i inventory trio-final.yml"
   }
-
   depends_on = [
     module.aws
   ]
@@ -31,5 +32,4 @@ resource "local_file" "docker-daemon" {
     {
       do_droplets = "${module.digital_ocean.droplets}"
   })
-
 }

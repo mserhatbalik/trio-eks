@@ -19,7 +19,6 @@ resource "aws_iam_openid_connect_provider" "oidc_provider" {
 
 
 # Extract OIDC Provider from OIDC Provider ARN
-# BU LOCALE' İHTİYACIN OLMAYABİLİR EĞİTİMDE FARKLI BİR İŞ İÇİN OUTPUTA PASLIYOR BAŞKA BİR İŞ İÇİN İHTİYAÇ DUYUYOR.
 # Yukarıdaki outputdan gelen stringi oidc-provider/ seperatorunu kullanarak ikiye bölüyoruz ve sonrasında element function ile elde eddiğimiz 2 değerin 1. indexini local değişkene atıyoruz.
 locals {
     aws_iam_oidc_connect_provider_extract_from_arn = element(split("oidc-provider/", "${aws_iam_openid_connect_provider.oidc_provider.arn}"), 1)

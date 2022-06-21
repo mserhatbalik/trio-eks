@@ -1,5 +1,4 @@
-#### DIGITAL OCEAN VARIABLES ####
-////////////////////////////////////////////////////
+######### DIGITAL OCEAN VARIABLES #########
 # Default değişkenleri burada tanımlıyoruz. Burada tanımları yapmak zorundayız. Bu sayede kod içerisindeki değişkenler defined edilmişi oluyor. Ayrıca bu yaptığımız tanımlarda .tfvars dosyasındakiler ile eşleşiyor. Köprü gibi düşünebilirsin 3 koldan bağlı. 
 
 # DigitalOcean'a export ile geçtiğimiz API tokenin değişken ismi. Aşağıdaki provider bloğunda da buna referans veriyoruz.. Eğer export yapmazsan her apply-destroy işlemi sırasında konsoldan manuel olarak girmeni istiyor DigitalOcean acces API token'ı terraform.
@@ -46,8 +45,8 @@ variable "do_ssh_key" {
   default = "/home/serhat/.ssh/id_rsa.pub"
 }
 
-#### AWS VARIABLES ####
-////////////////////////////////////////////////////
+######### AWS VARIABLES #########
+
 variable "aws_environment" {
   type    = string
   default = "test"
@@ -99,7 +98,7 @@ variable "aws_bastion_ip" {
 }
 
 
-##### EKS SPECIFIC ######
+######### EKS SPECIFIC #########
 
 variable "aws_eks_cluster_name" {
   type = string
