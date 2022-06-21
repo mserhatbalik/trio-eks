@@ -109,8 +109,8 @@
       pattern: "nexus-*"
       file_type: directory
     register: find_result
-  # Nexus folder'ı var mı diye kontrol ediyoruz. Bunun için Stat isimli modülü kullanıyoruz. Bu check işini yapmamızın sebebi, bir sonraki taskda nexus folder'ı rename ediyoruz. Ama eğer bu folder zaten varsa hata alacağımız için bunu aşağıda conditiona bağladık stat'dan aldığımız veriyi check ederek. Çünkü "command" ve "shell" komutlar ansible'da state managed değildir ve her zaten execute edilirler ve bu problem yaratır eğer ilgili önlemlere proaktif bir şekilde almazsak.
-  
+
+  # Nexus folder'ı var mı diye kontrol ediyoruz. Bunun için Stat isimli modülü kullanıyoruz. Bu check işini yapmamızın sebebi, bir sonraki taskda nexus folder'ı rename ediyoruz. Ama eğer bu folder zaten varsa hata alacağımız için bunu aşağıda conditiona bağladık stat'dan aldığımız veriyi check ederek. Çünkü "command" ve "shell" komutlar ansible'da state managed değildir ve her zaten execute edilirler ve bu problem yaratır eğer ilgili önlemlere proaktif bir şekilde almazsak.  
   - name: Rename nexus folder
     command: mv {{find_result.files[0].path}} /opt/nexus
     when: not stat_result.stat.exists
@@ -200,62 +200,6 @@
       status_code: 201, 400
       force_basic_auth: yes
 
-# - name: Generate a self signed SSL certificate.
-#   hosts: nexus
-#   become: True
-#   tasks:
-
-#   - name:  Create certs directory
-#     file:
-#       path: /root/certs
-#       state: directory
-#       owner: root
-#       group: root
-#       recurse: yes
-
-#   - name: create CA key
-#     openssl_privatekey:
-#       path: /root/certs/CA_key.pem
-#     register: ca_key
-
-#   - name: create the CA CSR
-#     openssl_csr:
-#       path: /root/certs/CA.csr
-#       privatekey_path: "{{ ca_key.filename }}"
-#       common_name: "my-ca"
-#     register: ca_csr
-
-#   - name: sign the CA CSR
-#     openssl_certificate:
-#       path: /root/certs/CA.crt
-#       csr_path: "{{ ca_csr.filename }}"
-#       privatekey_path: "{{ ca_key.filename }}"
-#       provider: selfsigned
-#     register: ca_crt
-
-#   - name: create host CSR signing key
-#     openssl_privatekey:
-#       path: /root/certs/nexus_key.pem
-#     register: nexus_key
-
-#   - name: create the CSR for the Nexus server
-#     openssl_csr:
-#       path: /root/certs/nexus.csr
-#       privatekey_path: "{{ nexus_key.filename }}"
-#       common_name: nexustest.xyz
-#       subject_alt_name: 'DNS:www.nexustest.xyz'
-#     register: nexus_csr
-
-#   - name: sign the CSR for the LDAP server
-#     openssl_certificate:
-#       path: /root/certs/nexus_cert.crt
-#       csr_path: "{{ nexus_csr.filename }}"
-#       provider: ownca
-#       ownca_path: "{{ ca_crt.filename }}"
-#       ownca_privatekey_path: "{{ ca_key.filename }}"
-#     register: nexus_crt
-
-
 - name: Install NGINX as reverse proxy.
   hosts: nexus
   become: True
@@ -274,14 +218,6 @@
       group: root
       mode: 0644
 
-  # - name:  Create certs directory
-  #   file:
-  #     path: /root/certs
-  #     state: directory
-  #     owner: root
-  #     group: root
-  #     recurse: yes
-
   - name: Copy the Nexus certificate key
     template:
       src: ../config/certificates/cert-key.pem
@@ -297,14 +233,6 @@
       owner: root
       group: root
       mode: 0644
-  
-  # - name: Copy the CA certificate.
-  #   template:
-  #     src: ../config/certificates/ca.pem
-  #     dest: /etc/nginx/ca.pem
-  #     owner: root
-  #     group: root
-  #     mode: 0644
 
   - name: Reload service nginx, in all cases
     service:
@@ -315,24 +243,6 @@
     service:
       name: nginx
       state: restarted
-
-
-#### sertifikalarda sanırım sorun var. konfigi düzgün kopyaladın çünkü ve nginx restart oldu yeni config ile.
-
-
-
-
-
-
-
-
-  # Playbooku Oracle VM içerisinde çalıştırdığın için kendi windows makinene şu anda ekleme yapamıyorsun. Bunu en son hallet.
-
-  # - name: Add nexustest.xyz.com to Windows hosts file
-  #   community.windows.win_hosts:
-  #     state: present
-  #     canonical_name: nexustest.xyz
-  #     ip_address: "{{ hostvars['nexus']['ansible_default_ipv4']['address'] }}"
 
 ################## JENKINS SERVER ####################
 
@@ -930,7 +840,7 @@
         path: /var/lib/jenkins/workspace/recommendationservice/recommendationservice.txt
         state: absent
 
-#### EKS WORKERS #####
+#################### EKS WORKERS ####################
 
 - name: Configure Workers 
   hosts: workers
@@ -959,7 +869,7 @@
       state: restarted
 
 
-###### APPLY APPLICATIONS MANIFESTS #######
+#################### APPLY APPLICATIONS MANIFESTS ####################
 
 - name: Configure Workers
   hosts: localhost
